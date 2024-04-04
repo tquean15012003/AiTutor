@@ -5,9 +5,11 @@ from fastapi import UploadFile
 from langchain_openai import ChatOpenAI
 from langchain.chains.llm import LLMChain
 from langchain.schema import HumanMessage
-from langchain_community.tools import YouTubeSearchTool
+from langchain.callbacks.manager import CallbackManager
 from langchain.agents import ZeroShotAgent, AgentExecutor
+from langchain_core.callbacks.base import Callbacks
 
+from helpers.tools import youtube_search
 from helpers.StorageManager import store_manager
 from utils.ImageProcessing import convert_image_to_base64
 
@@ -29,17 +31,20 @@ from the image if any.
 
 
 class QueryAnswerer:
-    def __init__(self):
-        self.llm = ChatOpenAI(model_name="gpt-4", temperature=1.0)
-        self.tools = [
-            YouTubeSearchTool(
-                description="When the user poses an educational query, such as a question related to mathematics, the system should initially offer recommendations for relevant video tutorials. These suggestions are intended to enable the user to explore the topic further on their own."
-            )
-        ]
+    def __init__(self, stream_callback: Callbacks):
+        self.llm = ChatOpenAI(
+            model_name="gpt-4-vision-preview",
+            temperature=1.0,
+            streaming=True,
+            callbacks=stream_callback,
+            verbose=True,
+        )
+
+        self.tools = [youtube_search]
 
     async def answer_query(
         self, conversation_id: str, query: Optional[str], image: Optional[UploadFile]
-    ) -> str:
+    ):
         if not query and not image:
             raise ValueError('At least one of "query" or "image" must be provided.')
 
@@ -65,8 +70,7 @@ class QueryAnswerer:
             memory=memory,
         )
 
-        answer = agent_chain.run(input=question)
-
+        answer = await agent_chain.arun(input=question)
         store_manager.store(conversation_id=conversation_id, memory=memory)
         return answer
 
